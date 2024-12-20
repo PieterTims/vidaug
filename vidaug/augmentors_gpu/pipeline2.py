@@ -1,171 +1,80 @@
 """
-Augmenters that apply affine transformations.
+Augmenters for pipeline 2 augmentations
 
 To use the augmenters, clone the complete repo and use
-`from vidaug import augmenters as va`
-and then e.g. :
-    seq = va.Sequential([ va.RandomRotate(30),
-                          va.RandomResize(0.2)  ])
+`from vidaug import augmenters_gpu as va`
 
 List of augmenters:
-    * RandomRotate
-    * RandomResize
-    * RandomTranslate
-    * RandomShear
+    * SaltAndPepper
+    * ElasticTransformation
+    * GaussianBlur
 """
-
+import torch
+import torchvision.transforms.functional as F
 import numpy as np
-import numbers
-import random
-import scipy
-import skimage
-import PIL
-import cv2
+from PIL import Image
+from torchvision.transforms import ElasticTransform
 
-
-class RandomRotate(object):
+class SaltAndPepper:
     """
-    Rotate video randomly by a random angle within given boundsi.
+    Augmenter to add salt(white) and pepper(black) noise.
+    
+    Args:
+        salt_ratio (float): The ratio of salt noise. Default is 0.01.
+        pepper_ratio (float): The ratio of pepper noise. Default is 0.01.
+    """
+
+    def __init__(self, salt_ratio=0.01, pepper_ratio=0.01):
+        self.salt_ratio = salt_ratio
+        self.pepper_ratio = pepper_ratio
+
+    def __call__(self, clip):
+        return [self._apply_salt_and_pepper(img) for img in clip]
+
+    def _apply_salt_and_pepper(self, img):
+        img_tensor = torch.tensor(np.array(img), dtype=torch.float32).cuda()
+        
+        salt_noise = torch.rand(img_tensor.shape[:2], device='cuda') < self.salt_ratio
+        pepper_noise = torch.rand(img_tensor.shape[:2], device='cuda') < self.pepper_ratio
+        
+        img_tensor[:, salt_noise] = 255.0
+        img_tensor[:, pepper_noise] = 0.0
+        
+        return F.to_pil_image(img_tensor.cpu().byte())
+
+class ElasticTransformation:
+    """
+    Augmenter to apply elastic transformation.
 
     Args:
-        degrees (sequence or int): Range of degrees to randomly
-        select from. If degrees is a number instead of sequence
-        like (min, max), the range of degrees, will be
-        (-degrees, +degrees).
+        alpha (float): The alpha parameter for elastic transformation. Default is 34.0.
+        sigma (float): The sigma parameter for elastic transformation. Default is 4.0.
     """
 
-    def __init__(self, degrees):
-        if isinstance(degrees, numbers.Number):
-            if degrees < 0:
-                raise ValueError('If degrees is a single number,'
-                                 'must be positive')
-            degrees = (-degrees, degrees)
-        else:
-            if len(degrees) != 2:
-                raise ValueError('If degrees is a sequence,'
-                                 'it must be of len 2.')
-
-        self.degrees = degrees
+    def __init__(self, alpha=34.0, sigma=4.0):
+        self.elastic_transform = ElasticTransform(alpha=alpha, sigma=sigma)
 
     def __call__(self, clip):
-        angle = random.uniform(self.degrees[0], self.degrees[1])
-        if isinstance(clip[0], np.ndarray):
-            rotated = [skimage.transform.rotate(img, angle) for img in clip]
-        elif isinstance(clip[0], PIL.Image.Image):
-            rotated = [img.rotate(angle) for img in clip]
-        else:
-            raise TypeError('Expected numpy.ndarray or PIL.Image' +
-                            'but got list of {0}'.format(type(clip[0])))
+        return [self.elastic_transform(img) for img in clip]
 
-        return rotated
-
-
-class RandomResize(object):
+class GaussianBlur:
     """
-    Resize video bysoomingin and out.
+    Augmenter to blur images using gaussian kernels.
 
     Args:
-        rate (float): Video is scaled uniformly between
-        [1 - rate, 1 + rate].
-
-        interp (string): Interpolation to use for re-sizing
-        ('nearest', 'lanczos', 'bilinear', 'bicubic' or 'cubic').
+        sigma (float): Standard deviation of the gaussian kernel.
     """
 
-    def __init__(self, rate=0.0, interp='bilinear'):
-        self.rate = rate
-
-        self.interpolation = interp
+    def __init__(self, sigma):
+        self.sigma = sigma
 
     def __call__(self, clip):
-        scaling_factor = random.uniform(1 - self.rate, 1 + self.rate)
+        return [self._apply_blur(img) for img in clip]
 
-        if isinstance(clip[0], np.ndarray):
-            im_h, im_w, im_c = clip[0].shape
-        elif isinstance(clip[0], PIL.Image.Image):
-            im_w, im_h = clip[0].size
-
-        new_w = int(im_w * scaling_factor)
-        new_h = int(im_h * scaling_factor)
-        new_size = (new_h, new_w)
-        if isinstance(clip[0], np.ndarray):
-            return [scipy.misc.imresize(img, size=(new_h, new_w),interp=self.interpolation) for img in clip]
-        elif isinstance(clip[0], PIL.Image.Image):
-            return [img.resize(size=(new_w, new_h), resample=self._get_PIL_interp(self.interpolation)) for img in clip]
-        else:
-            raise TypeError('Expected numpy.ndarray or PIL.Image' +
-                            'but got list of {0}'.format(type(clip[0])))
-
-    def _get_PIL_interp(self, interp):
-        if interp == 'nearest':
-            return PIL.Image.NEAREST
-        elif interp == 'lanczos':
-            return PIL.Image.LANCZOS
-        elif interp == 'bilinear':
-            return PIL.Image.BILINEAR
-        elif interp == 'bicubic':
-            return PIL.Image.BICUBIC
-        elif interp == 'cubic':
-            return PIL.Image.CUBIC
-
-
-class RandomTranslate(object):
-    """
-      Shifting video in X and Y coordinates.
-
-        Args:
-            x (int) : Translate in x direction, selected
-            randomly from [-x, +x] pixels.
-
-            y (int) : Translate in y direction, selected
-            randomly from [-y, +y] pixels.
-    """
-
-    def __init__(self, x=0, y=0):
-        self.x = x
-        self.y = y
-
-    def __call__(self, clip):
-        x_move = random.randint(-self.x, +self.x)
-        y_move = random.randint(-self.y, +self.y)
-
-        if isinstance(clip[0], np.ndarray):
-            rows, cols, ch = clip[0].shape
-            transform_mat = np.float32([[1, 0, x_move], [0, 1, y_move]])
-            return [cv2.warpAffine(img, transform_mat, (cols, rows)) for img in clip]
-        elif isinstance(clip[0], PIL.Image.Image):
-            return [img.transform(img.size, PIL.Image.AFFINE, (1, 0, x_move, 0, 1, y_move)) for img in clip]
-        else:
-            raise TypeError('Expected numpy.ndarray or PIL.Image' +
-                            'but got list of {0}'.format(type(clip[0])))
-
-
-class RandomShear(object):
-    """
-    Shearing video in X and Y directions.
-
-    Args:
-        x (int) : Shear in x direction, selected randomly from
-        [-x, +x].
-
-        y (int) : Shear in y direction, selected randomly from
-        [-y, +y].
-    """
-
-    def __init__(self, x, y):
-        self.x = x
-        self.y = y
-
-    def __call__(self, clip):
-        x_shear = random.uniform(-self.x, self.x)
-        y_shear = random.uniform(-self.y, self.y)
-
-        if isinstance(clip[0], np.ndarray):
-            rows, cols, ch = clip[0].shape
-            transform_mat = np.float32([[1, x_shear, 0], [y_shear, 1, 0]])
-            return [cv2.warpAffine(img, transform_mat, (cols, rows)) for img in clip]
-        elif isinstance(clip[0], PIL.Image.Image):
-            return [img.transform(img.size, PIL.Image.AFFINE, (1, x_shear, 0, y_shear, 1, 0)) for img in clip]
-        else:
-            raise TypeError('Expected numpy.ndarray or PIL.Image' +
-                                'but got list of {0}'.format(type(clip[0])))
+    def _apply_blur(self, img):
+        img_tensor = torch.tensor(np.array(img), dtype=torch.float32).cuda()
+        kernel_size = int(self.sigma * 6 + 1)  # Typically, kernel_size = 6*sigma + 1
+        if kernel_size % 2 == 0:
+            kernel_size += 1  # Ensure kernel_size is odd
+        blurred = F.gaussian_blur(img_tensor.unsqueeze(0), kernel_size, [self.sigma, self.sigma]).squeeze(0)
+        return F.to_pil_image(blurred.cpu())
