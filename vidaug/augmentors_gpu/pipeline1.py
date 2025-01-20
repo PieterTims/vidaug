@@ -31,9 +31,9 @@ class AdjustBrightness:
     def __call__(self, clip):
         result = []
         for img in clip:
-            img_tensor = torch.tensor(np.array(img)).cuda()
+            img_tensor = torch.from_numpy(np.array(img)).float().cuda()
             adjusted_img_tensor = F.adjust_brightness(img_tensor, self.factor)
-            result.append(adjusted_img_tensor.cpu().numpy())
+            result.append(adjusted_img_tensor.cpu().detach().numpy())
         return result
 
 class AdjustContrast(object):
@@ -54,9 +54,9 @@ class AdjustContrast(object):
     def __call__(self, clip):
         result = []
         for img in clip:
-            img_tensor = torch.tensor(np.array(img)).cuda()
+            img_tensor = torch.from_numpy(np.array(img)).float().cuda()
             adjusted_img_tensor = F.adjust_contrast(img_tensor, self.factor)
-            result.append(adjusted_img_tensor.cpu().numpy())
+            result.append(adjusted_img_tensor.cpu().detach().numpy())
         return result
 
 class AdjustSharpness(object):
@@ -77,7 +77,7 @@ class AdjustSharpness(object):
     def __call__(self, clip):
         result = []
         for img in clip:
-            img_tensor = torch.tensor(np.array(img)).cuda()
+            img_tensor = torch.from_numpy(np.array(img)).float().cuda()
             adjusted_img_tensor = F.adjust_sharpness(img_tensor, self.factor)
-            result.append(adjusted_img_tensor.cpu().numpy())
+            result.append(adjusted_img_tensor.cpu().detach().numpy())
         return result

@@ -1,80 +1,63 @@
-"""
-Augmenters for pipeline 2 augmentations
-
-To use the augmenters, clone the complete repo and use
-`from vidaug import augmenters_gpu as va`
-
-List of augmenters:
-    * SaltAndPepper
-    * ElasticTransformation
-    * GaussianBlur
-"""
 import torch
 import torchvision.transforms.functional as F
 import numpy as np
 from PIL import Image
-from torchvision.transforms import ElasticTransform
 
-class SaltAndPepper:
+class BoxBlur:
     """
-    Augmenter to add salt(white) and pepper(black) noise.
-    
-    Args:
-        salt_ratio (float): The ratio of salt noise. Default is 0.01.
-        pepper_ratio (float): The ratio of pepper noise. Default is 0.01.
-    """
-
-    def __init__(self, salt_ratio=0.01, pepper_ratio=0.01):
-        self.salt_ratio = salt_ratio
-        self.pepper_ratio = pepper_ratio
-
-    def __call__(self, clip):
-        return [self._apply_salt_and_pepper(img) for img in clip]
-
-    def _apply_salt_and_pepper(self, img):
-        img_tensor = torch.tensor(np.array(img), dtype=torch.float32).cuda()
-        
-        salt_noise = torch.rand(img_tensor.shape[:2], device='cuda') < self.salt_ratio
-        pepper_noise = torch.rand(img_tensor.shape[:2], device='cuda') < self.pepper_ratio
-        
-        img_tensor[:, salt_noise] = 255.0
-        img_tensor[:, pepper_noise] = 0.0
-        
-        return F.to_pil_image(img_tensor.cpu().byte())
-
-class ElasticTransformation:
-    """
-    Augmenter to apply elastic transformation.
+    Augmenter to apply box blur to image.
 
     Args:
-        alpha (float): The alpha parameter for elastic transformation. Default is 34.0.
-        sigma (float): The sigma parameter for elastic transformation. Default is 4.0.
+        kernel_size (int): Size of the Gaussian kernel.
+        sigma (float): Standard deviation.
     """
 
-    def __init__(self, alpha=34.0, sigma=4.0):
-        self.elastic_transform = ElasticTransform(alpha=alpha, sigma=sigma)
-
-    def __call__(self, clip):
-        return [self.elastic_transform(img) for img in clip]
-
-class GaussianBlur:
-    """
-    Augmenter to blur images using gaussian kernels.
-
-    Args:
-        sigma (float): Standard deviation of the gaussian kernel.
-    """
-
-    def __init__(self, sigma):
+    def __init__(self, kernel_size=3, sigma=1.0):
+        self.kernel_size = kernel_size
         self.sigma = sigma
 
     def __call__(self, clip):
-        return [self._apply_blur(img) for img in clip]
+        result = []
+        for img in clip:
+            img_tensor = torch.from_numpy(np.array(img)).float().cuda()
+            adjusted_img_tensor = F.gaussian_blur(img=img_tensor, kernel_size=self.kernel_size, sigma=self.sigma)
+            result.append(adjusted_img_tensor.cpu().detach().numpy())
+        return result
 
-    def _apply_blur(self, img):
-        img_tensor = torch.tensor(np.array(img), dtype=torch.float32).cuda()
-        kernel_size = int(self.sigma * 6 + 1)  # Typically, kernel_size = 6*sigma + 1
-        if kernel_size % 2 == 0:
-            kernel_size += 1  # Ensure kernel_size is odd
-        blurred = F.gaussian_blur(img_tensor.unsqueeze(0), kernel_size, [self.sigma, self.sigma]).squeeze(0)
-        return F.to_pil_image(blurred.cpu())
+class AdjustShear:
+    """
+    Augmenter to apply shear transformation to image.
+
+    Args:
+        shear (float): Shear factor.
+    """
+
+    def __init__(self, shear):
+        self.shear = shear
+
+    def __call__(self, clip):
+        result = []
+        for img in clip:
+            img_tensor = torch.from_numpy(np.array(img)).float().cuda()
+            adjusted_img_tensor = F.affine(img=img_tensor, angle=0, translate=[0, 0], scale=1.0, shear=self.shear)
+            result.append(adjusted_img_tensor.cpu().detach().numpy())
+        return result
+
+class AdjustRotation:
+    """
+    Augmenter to apply rotation to images.
+
+    Args:
+        angle (float): Rotation angle in degrees.
+    """
+
+    def __init__(self, angle):
+        self.angle = angle
+
+    def __call__(self, clip):
+        result = []
+        for img in clip:
+            img_tensor = torch.from_numpy(np.array(img)).float().cuda()
+            adjusted_img_tensor = F.rotate(img=img_tensor, angle=self.angle)
+            result.append(adjusted_img_tensor.cpu().detach().numpy())
+        return result
